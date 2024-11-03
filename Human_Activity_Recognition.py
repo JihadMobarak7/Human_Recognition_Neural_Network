@@ -1,64 +1,76 @@
 import pandas as pd
 import numpy as np
-from sklearn.model_selection import train_test_split
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import StandardScaler, LabelEncoder
+from sklearn.model_selection import train_test_split
 from tensorflow.keras.models import Sequential
-from tensorflow.keras.layers import Dense, Dropout
-from tensorflow.keras.utils import to_categorical
+from tensorflow.keras.layers import Dense, Dropout, Input
+from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 
-def load_data():
-    # Load dataset
-    train_data = pd.read_csv('train.csv')
-    test_data = pd.read_csv('test.csv')
+def load_and_preprocess_data():
+    train_data = pd.read_csv('/content/train.csv')
+    test_data = pd.read_csv('/content/test.csv')
+    print(train_data.describe())
+    print("\nMissing values in training data:", train_data.isnull().sum().sum())
+    print("Missing values in testing data:", test_data.isnull().sum().sum())
 
-    return train_data, test_data
-
-def preprocess_data(train_data, test_data):
-    # Assuming the activity labels are the last column in the dataset
     X_train = train_data.iloc[:, :-1]
     y_train = train_data.iloc[:, -1]
     X_test = test_data.iloc[:, :-1]
     y_test = test_data.iloc[:, -1]
 
-    # Normalize features
     scaler = StandardScaler()
     X_train = scaler.fit_transform(X_train)
     X_test = scaler.transform(X_test)
 
-    # Encode labels
     encoder = LabelEncoder()
     y_train = encoder.fit_transform(y_train)
     y_test = encoder.transform(y_test)
-    y_train = to_categorical(y_train)
-    y_test = to_categorical(y_test)
 
     return X_train, y_train, X_test, y_test
 
-def build_model(input_shape, num_classes):
+def build_and_train_model(X_train, y_train, X_test, y_test):
     model = Sequential([
-        Dense(64, activation='relu', input_shape=(input_shape,)),
-        Dropout(0.5),
+        Input(shape=(X_train.shape[1],)),
         Dense(64, activation='relu'),
-        Dropout(0.5),
-        Dense(num_classes, activation='softmax')
+        Dropout(0.3),
+        Dense(64, activation='relu'),
+        Dropout(0.3),
+        Dense(len(np.unique(y_train)), activation='softmax')
     ])
 
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
-    return model
+    model.compile(optimizer='adam', loss='sparse_categorical_crossentropy', metrics=['accuracy'])
 
-def main():
-    train_data, test_data = load_data()
-    X_train, y_train, X_test, y_test = preprocess_data(train_data, test_data)
+    early_stop = EarlyStopping(monitor='val_loss', patience=3, restore_best_weights=True)
+    reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.2, patience=2, min_lr=0.0001, verbose=1)
+    checkpoint = ModelCheckpoint('best_model.h5', monitor='val_accuracy', save_best_only=True)
 
-    model = build_model(X_train.shape[1], y_train.shape[1])
-    model.summary()
+    history = model.fit(X_train, y_train, epochs=20, validation_data=(X_test, y_test),
+                        callbacks=[early_stop, reduce_lr, checkpoint], verbose=2)
 
-    # Train the model
-    model.fit(X_train, y_train, epochs=20, validation_data=(X_test, y_test), verbose=2)
+    plot_results(history)
 
-    # Evaluate the model
-    loss, accuracy = model.evaluate(X_test, y_test, verbose=0)
-    print(f"Test Accuracy: {accuracy*100:.2f}%")
+def plot_results(history):
+    plt.figure(figsize=(12, 5))
+    plt.subplot(1, 2, 1)
+    plt.plot(history.history['accuracy'], label='Train Accuracy')
+    plt.plot(history.history['val_accuracy'], label='Test Accuracy')
+    plt.title('Model Accuracy')
+    plt.ylabel('Accuracy')
+    plt.xlabel('Epoch')
+    plt.legend(loc='lower right')
+    plt.grid(True)
+
+    plt.subplot(1, 2, 2)
+    plt.plot(history.history['loss'], label='Train Loss')
+    plt.plot(history.history['val_loss'], label='Test Loss')
+    plt.title('Model Loss')
+    plt.ylabel('Loss')
+    plt.xlabel('Epoch')
+    plt.legend(loc='upper right')
+    plt.grid(True)
+    plt.show()
 
 if __name__ == "__main__":
-    main()
+    X_train, y_train, X_test, y_test = load_and_preprocess_data()
+    build_and_train_model(X_train, y_train, X_test, y_test)
